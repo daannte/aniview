@@ -220,7 +220,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// Select the next episode by default
 					nextEp := item.animeEntry.Progress + 1
-					if nextEp >= 0 && nextEp < len(items) {
+					if nextEp >= 0 && nextEp <= len(items) {
 						m.episodeList.Select(nextEp - 1)
 					}
 
