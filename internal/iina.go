@@ -111,6 +111,14 @@ func getPausedState(ipcSocketPath string) (bool, error) {
 }
 
 func CleanupSocket(socketPath string) {
+	if _, err := os.Stat(socketPath); err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		fmt.Printf("Error checking socket: %v\n", err)
+		return
+	}
+
 	if err := os.Remove(socketPath); err != nil {
 		fmt.Printf("Error removing socket: %v\n", err)
 	}
