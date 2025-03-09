@@ -39,7 +39,101 @@ func UpdateUserInfo(config *Config) error {
 	return nil
 }
 
-// GetCurrentlyWatching fetches the user's currently watching anime list
+// Fetches the user's planned anime list
+func GetPlanned(config *Config) ([]AnimeEntry, error) {
+	query := `
+	query ($userId: Int) {
+		MediaListCollection(userId: $userId, type: ANIME, status: PLANNING) {
+			lists {
+				name
+				entries {
+					id
+					status
+					progress
+					updatedAt
+					startedAt {
+						year
+						month
+						day
+					}
+					completedAt {
+						year
+						month
+						day
+					}
+					media {
+						id
+						title {
+							romaji
+							english
+							native
+						}
+						episodes
+						format
+						status
+						description
+						coverImage {
+							medium
+							large
+						}
+						idMal
+						averageScore
+						seasonYear
+						season
+						nextAiringEpisode {
+							episode
+							timeUntilAiring
+						}
+					}
+				}
+			}
+		}
+	}
+	`
+
+	variables := map[string]interface{}{
+		"userId": config.UserID,
+	}
+
+	var response MediaListCollection
+	if err := executeAniListQuery(config.Token, query, variables, &response); err != nil {
+		return nil, fmt.Errorf("failed to fetch watching list: %v", err)
+	}
+
+	// Convert the response to a simpler format for the UI
+	var animeList []AnimeEntry
+	for _, list := range response.Data.MediaListCollection.Lists {
+		for _, entry := range list.Entries {
+			nextEp := entry.Progress + 1
+
+			title := entry.Media.Title.English
+			if title == "" {
+				title = entry.Media.Title.Romaji
+			}
+
+			maxEpisodes := entry.Media.Episodes
+			if entry.Media.NextAiringEpisode != nil {
+				maxEpisodes = entry.Media.NextAiringEpisode.Episode - 1
+			}
+
+			animeList = append(animeList, AnimeEntry{
+				Title:       title,
+				Progress:    entry.Progress,
+				Episodes:    maxEpisodes,
+				ID:          entry.Media.ID,
+				MalId:       entry.Media.MalId,
+				CoverImage:  entry.Media.CoverImage.Medium,
+				Description: entry.Media.Description,
+				NextEpisode: nextEp,
+				IsAiring:    entry.Media.NextAiringEpisode != nil,
+			})
+		}
+	}
+
+	return animeList, nil
+}
+
+// Fetches the user's currently watching anime list
 func GetCurrentlyWatching(config *Config) ([]AnimeEntry, error) {
 	query := `
 	query ($userId: Int) {

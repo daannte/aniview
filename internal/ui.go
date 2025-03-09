@@ -28,6 +28,20 @@ var (
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF0000"))
+
+	tabStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A8A8A8")).
+			Padding(0, 1).
+			Align(lipgloss.Center).
+			Border(lipgloss.NormalBorder(), false, false, false, false) // No bottom border
+	activeTabStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 1).
+			Align(lipgloss.Center).
+			Bold(true) // Bold text for active tab
+
+	tabGap = lipgloss.NewStyle().Width(1)
 )
 
 // AnimeItem represents an item in the list UI
@@ -126,15 +140,19 @@ func NewCompactDelegate() list.ItemDelegate {
 
 // Model represents the UI state
 type Model struct {
-	config        *Config
-	animeList     list.Model
-	episodeList   list.Model
-	animeEntries  []AnimeEntry
-	loading       bool
-	spinner       spinner.Model
-	err           error
-	selectedAnime *AnimeItem
-	state         string // "selecting", "episode", "loading", "error"
+	config         *Config
+	animeList      list.Model
+	plannedList    list.Model
+	episodeList    list.Model
+	animeEntries   []AnimeEntry
+	plannedEntries []AnimeEntry
+	loading        bool
+	spinner        spinner.Model
+	err            error
+	selectedAnime  *AnimeItem
+	state          string // "selecting", "episode", "loading", "error"
+	activeTab      int    // 0 = watching, 1 = planned
+	tabs           []string
 }
 
 func NewModel(config *Config) *Model {
@@ -148,10 +166,15 @@ func NewModel(config *Config) *Model {
 	animeDelegate.Styles.SelectedDesc = animeDelegate.Styles.SelectedDesc.Foreground(lipgloss.Color("#04B575"))
 
 	animeList := list.New([]list.Item{}, animeDelegate, 0, 0)
-	animeList.Title = "Currently Watching"
 	animeList.SetShowStatusBar(false)
 	animeList.SetFilteringEnabled(true)
-	animeList.Styles.Title = titleStyle
+	animeList.SetShowTitle(false)
+
+	// Create planned list
+	plannedList := list.New([]list.Item{}, animeDelegate, 0, 0)
+	plannedList.SetShowStatusBar(false)
+	plannedList.SetFilteringEnabled(true)
+	plannedList.SetShowTitle(false)
 
 	// Create episode list with compact delegate
 	episodeList := list.New([]list.Item{}, NewCompactDelegate(), 0, 0)
@@ -163,21 +186,35 @@ func NewModel(config *Config) *Model {
 	return &Model{
 		config:      config,
 		animeList:   animeList,
+		plannedList: plannedList,
 		episodeList: episodeList,
 		spinner:     s,
 		loading:     true,
 		state:       "loading",
+		activeTab:   0,
+		tabs:        []string{"Currently Watching", "Planned"},
 	}
 }
 
-// InitAnimeList initializes the anime list
-func (m *Model) InitAnimeList() tea.Cmd {
+// InitAnimeList initializes both anime lists
+func (m *Model) InitAnimeLists() tea.Cmd {
 	return func() tea.Msg {
+		// Get currently watching anime
 		animeEntries, err := GetCurrentlyWatching(m.config)
 		if err != nil {
 			return errMsg{err}
 		}
-		return animeListMsg{animeEntries}
+
+		// Get planned anime
+		plannedEntries, err := GetPlanned(m.config)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		return animeListsMsg{
+			watching: animeEntries,
+			planned:  plannedEntries,
+		}
 	}
 }
 
@@ -185,7 +222,7 @@ func (m *Model) InitAnimeList() tea.Cmd {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		m.InitAnimeList(),
+		m.InitAnimeLists(),
 	)
 }
 
@@ -193,23 +230,45 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		h, v := msg.Width-4, msg.Height-4 // Leave some margin
+		h, v := msg.Width-4, msg.Height-6 // Leave some margin plus space for tabs
 		m.animeList.SetSize(h, v)
+		m.plannedList.SetSize(h, v)
 		m.episodeList.SetSize(h, v)
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "tab", "right", "l":
+			if m.state == "selecting" {
+				m.activeTab = (m.activeTab + 1) % len(m.tabs)
+				return m, nil
+			}
+		case "shift+tab", "left", "h":
+			if m.state == "selecting" {
+				m.activeTab = (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
+				return m, nil
+			}
 		case "enter":
 			switch m.state {
 			case "selecting":
-				item, ok := m.animeList.SelectedItem().(AnimeItem)
+				var selectedItem AnimeItem
+				var ok bool
+
+				if m.activeTab == 0 {
+					selectedItem, ok = m.animeList.SelectedItem().(AnimeItem)
+				} else {
+					selectedItem, ok = m.plannedList.SelectedItem().(AnimeItem)
+				}
+
 				if ok {
-					m.selectedAnime = &item
+					m.selectedAnime = &selectedItem
 					m.state = "episode"
 
-					episodeCount := item.animeEntry.Episodes
+					episodeCount := selectedItem.animeEntry.Episodes
+					if episodeCount <= 0 {
+						episodeCount = 13 // Default to some reasonable value for planned anime
+					}
 
 					items := make([]list.Item, episodeCount)
 					for i := 0; i < episodeCount; i++ {
@@ -219,7 +278,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.episodeList.SetItems(items)
 
 					// Select the next episode by default
-					nextEp := item.animeEntry.Progress + 1
+					nextEp := selectedItem.animeEntry.Progress + 1
 					if nextEp >= 0 && nextEp <= len(items) {
 						m.episodeList.Select(nextEp - 1)
 					}
@@ -237,16 +296,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case animeListMsg:
-		m.animeEntries = msg.entries
-		items := make([]list.Item, len(m.animeEntries))
-		for i, entry := range m.animeEntries {
-			// Store the index so we can update the correct entry later
-			items[i] = AnimeItem{animeEntry: entry, index: i}
-		}
+	case animeListsMsg:
+		m.animeEntries = msg.watching
+		m.plannedEntries = msg.planned
 
-		// Update the list with the new items
-		m.animeList.SetItems(items)
+		// Create items for watching list
+		watchingItems := make([]list.Item, len(m.animeEntries))
+		for i, entry := range m.animeEntries {
+			watchingItems[i] = AnimeItem{animeEntry: entry, index: i}
+		}
+		m.animeList.SetItems(watchingItems)
+
+		// Create items for planned list
+		plannedItems := make([]list.Item, len(m.plannedEntries))
+		for i, entry := range m.plannedEntries {
+			plannedItems[i] = AnimeItem{animeEntry: entry, index: i}
+		}
+		m.plannedList.SetItems(plannedItems)
+
 		m.loading = false
 		m.state = "selecting"
 		return m, nil
@@ -273,17 +340,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Update progress in AniList
 				_ = UpdateProgress(m.config, m.selectedAnime.animeEntry.ID, epItem.number)
 
+				// Move from planned to watching if it was in planned
+				if m.activeTab == 1 {
+					// If this is the first episode watched, move the anime from planned to watching
+					if epItem.number == 1 {
+						// We should update the lists, but for simplicity we'll just return to
+						// the selection screen and force a refresh on next start
+						m.state = "selecting"
+						return m, nil
+					}
+				}
+
 				// Update local progress if the watched episode is the next one
 				if epItem.number == m.selectedAnime.animeEntry.Progress+1 {
-					m.animeEntries[m.selectedAnime.index].Progress = epItem.number
-					m.selectedAnime.animeEntry.Progress = epItem.number
+					if m.activeTab == 0 {
+						m.animeEntries[m.selectedAnime.index].Progress = epItem.number
+						m.selectedAnime.animeEntry.Progress = epItem.number
 
-					// Update the list items to reflect the progress change
-					items := make([]list.Item, len(m.animeEntries))
-					for i, entry := range m.animeEntries {
-						items[i] = AnimeItem{animeEntry: entry, index: i}
+						// Update the list items to reflect the progress change
+						items := make([]list.Item, len(m.animeEntries))
+						for i, entry := range m.animeEntries {
+							items[i] = AnimeItem{animeEntry: entry, index: i}
+						}
+						m.animeList.SetItems(items)
+					} else {
+						m.plannedEntries[m.selectedAnime.index].Progress = epItem.number
+						m.selectedAnime.animeEntry.Progress = epItem.number
+
+						// Update the list items to reflect the progress change
+						items := make([]list.Item, len(m.plannedEntries))
+						for i, entry := range m.plannedEntries {
+							items[i] = AnimeItem{animeEntry: entry, index: i}
+						}
+						m.plannedList.SetItems(items)
 					}
-					m.animeList.SetItems(items)
 				}
 			}
 
@@ -296,7 +386,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case "selecting":
 		var cmd tea.Cmd
-		m.animeList, cmd = m.animeList.Update(msg)
+		if m.activeTab == 0 {
+			m.animeList, cmd = m.animeList.Update(msg)
+		} else {
+			m.plannedList, cmd = m.plannedList.Update(msg)
+		}
 		return m, cmd
 	case "episode":
 		var cmd tea.Cmd
@@ -305,6 +399,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// renderTabs renders the tab bar
+func (m *Model) renderTabs() string {
+	var renderedTabs []string
+
+	for i, tab := range m.tabs {
+		if i == m.activeTab {
+			renderedTabs = append(renderedTabs, activeTabStyle.Render(tab))
+		} else {
+			renderedTabs = append(renderedTabs, tabStyle.Render(tab))
+		}
+
+		if i < len(m.tabs)-1 {
+			renderedTabs = append(renderedTabs, tabGap.Render("  "))
+		}
+	}
+
+	// Join tabs with a horizontal layout
+	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 }
 
 // View renders the UI
@@ -319,7 +433,21 @@ func (m *Model) View() string {
 
 	switch m.state {
 	case "selecting":
-		return m.animeList.View()
+		var b strings.Builder
+		// Render tabs
+		b.WriteString(fmt.Sprintf("\n   %s\n\n", m.renderTabs()))
+
+		// Render appropriate list
+		if m.activeTab == 0 {
+			b.WriteString(m.animeList.View())
+		} else {
+			b.WriteString(m.plannedList.View())
+		}
+
+		// Help text
+		b.WriteString("\n   Tab: Switch between lists, Enter: Select, q: Quit\n")
+
+		return b.String()
 	case "episode":
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("\n   %s\n\n", titleStyle.Render(m.selectedAnime.animeEntry.Title)))
@@ -388,8 +516,9 @@ func (m *Model) startPlayEpisode() tea.Cmd {
 }
 
 // Messages
-type animeListMsg struct {
-	entries []AnimeEntry
+type animeListsMsg struct {
+	watching []AnimeEntry
+	planned  []AnimeEntry
 }
 
 type errMsg struct {
