@@ -51,15 +51,19 @@ type Media struct {
 	CoverImage        Image  `json:"coverImage"`
 	MalId             int    `json:"idMal"`
 	AllanimeId        string
-	AverageScore      int                `json:"averageScore"`
-	SeasonYear        int                `json:"seasonYear"`
-	Season            string             `json:"season"`
-	NextAiringEpisode *NextAiringEpisode `json:"nextAiringEpisode"`
+	AverageScore      int               `json:"averageScore"`
+	SeasonYear        int               `json:"seasonYear"`
+	Season            string            `json:"season"`
+	NextAiringEpisode NextAiringEpisode `json:"nextAiringEpisode"`
 }
 
 type NextAiringEpisode struct {
 	Episode         int `json:"episode"`
 	TimeUntilAiring int `json:"timeUntilAiring"`
+}
+
+func (n NextAiringEpisode) IsEmpty() bool {
+	return n.Episode == 0 && n.TimeUntilAiring == 0
 }
 
 // Title represents the title of an anime
@@ -84,17 +88,18 @@ type Date struct {
 
 // AnimeEntry represents a single anime entry for display in the UI
 type AnimeEntry struct {
-	Title           string
-	Progress        int
-	Episodes        int
-	ID              int
-	MalId           int
-	CoverImage      string
-	Description     string
-	NextEpisode     int
-	CurrentEpisode  int
-	EpisodeDuration int
-	IsAiring        bool
+	Title             string
+	Progress          int
+	Episodes          int
+	ID                int
+	MalId             int
+	CoverImage        string
+	Description       string
+	NextEpisode       int
+	CurrentEpisode    int
+	EpisodeDuration   int
+	NextAiringEpisode NextAiringEpisode
+	IsAiring          bool
 }
 
 // Constants for the application

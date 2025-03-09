@@ -112,20 +112,21 @@ func GetPlanned(config *Config) ([]AnimeEntry, error) {
 			}
 
 			maxEpisodes := entry.Media.Episodes
-			if entry.Media.NextAiringEpisode != nil {
+			if !entry.Media.NextAiringEpisode.IsEmpty() {
 				maxEpisodes = entry.Media.NextAiringEpisode.Episode - 1
 			}
 
 			animeList = append(animeList, AnimeEntry{
-				Title:       title,
-				Progress:    entry.Progress,
-				Episodes:    maxEpisodes,
-				ID:          entry.Media.ID,
-				MalId:       entry.Media.MalId,
-				CoverImage:  entry.Media.CoverImage.Medium,
-				Description: entry.Media.Description,
-				NextEpisode: nextEp,
-				IsAiring:    entry.Media.NextAiringEpisode != nil,
+				Title:             title,
+				Progress:          entry.Progress,
+				Episodes:          maxEpisodes,
+				ID:                entry.Media.ID,
+				MalId:             entry.Media.MalId,
+				CoverImage:        entry.Media.CoverImage.Medium,
+				Description:       entry.Media.Description,
+				NextEpisode:       nextEp,
+				IsAiring:          !entry.Media.NextAiringEpisode.IsEmpty(),
+				NextAiringEpisode: entry.Media.NextAiringEpisode,
 			})
 		}
 	}
@@ -206,20 +207,21 @@ func GetCurrentlyWatching(config *Config) ([]AnimeEntry, error) {
 			}
 
 			maxEpisodes := entry.Media.Episodes
-			if entry.Media.NextAiringEpisode != nil {
+			if !entry.Media.NextAiringEpisode.IsEmpty() {
 				maxEpisodes = entry.Media.NextAiringEpisode.Episode - 1
 			}
 
 			animeList = append(animeList, AnimeEntry{
-				Title:       title,
-				Progress:    entry.Progress,
-				Episodes:    maxEpisodes,
-				ID:          entry.Media.ID,
-				MalId:       entry.Media.MalId,
-				CoverImage:  entry.Media.CoverImage.Medium,
-				Description: entry.Media.Description,
-				NextEpisode: nextEp,
-				IsAiring:    entry.Media.NextAiringEpisode != nil,
+				Title:             title,
+				Progress:          entry.Progress,
+				Episodes:          maxEpisodes,
+				ID:                entry.Media.ID,
+				MalId:             entry.Media.MalId,
+				CoverImage:        entry.Media.CoverImage.Medium,
+				Description:       entry.Media.Description,
+				NextEpisode:       nextEp,
+				IsAiring:          !entry.Media.NextAiringEpisode.IsEmpty(),
+				NextAiringEpisode: entry.Media.NextAiringEpisode,
 			})
 		}
 	}

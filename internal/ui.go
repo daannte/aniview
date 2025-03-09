@@ -70,6 +70,92 @@ func (i AnimeItem) FilterValue() string {
 	return i.animeEntry.Title
 }
 
+// DetailedView returns a detailed view of the anime with title, description, and airing info
+func (i AnimeItem) DetailedView() string {
+	var b strings.Builder
+
+	b.WriteString(titleStyle.Render(i.animeEntry.Title))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("Progress: %d/%d episodes\n", i.animeEntry.Progress, i.animeEntry.Episodes))
+
+	if i.animeEntry.IsAiring {
+		b.WriteString("Status: Currently Airing\n")
+	} else {
+		b.WriteString("Status: Completed\n")
+	}
+
+	if i.animeEntry.IsAiring {
+		timeUntil := formatTimeUntil(i.animeEntry.NextAiringEpisode.TimeUntilAiring)
+		b.WriteString(fmt.Sprintf("\nNext Episode: Episode %d\n", i.animeEntry.NextAiringEpisode.Episode))
+		b.WriteString(fmt.Sprintf("Airing: %s\n", timeUntil))
+	}
+
+	// Add a separator before description
+	b.WriteString("\nDescription:\n")
+
+	// Format and add the description with word wrapping
+	if i.animeEntry.Description != "" {
+		// Simple word wrapping for description (80 chars per line)
+		wrappedDesc := wordWrap(i.animeEntry.Description, 80)
+		b.WriteString(wrappedDesc)
+	} else {
+		b.WriteString("No description available.")
+	}
+
+	return b.String()
+}
+
+// Helper function to format time until airing in a human-readable format
+func formatTimeUntil(seconds int) string {
+	if seconds <= 0 {
+		return "Airing now"
+	}
+
+	days := seconds / 86400
+	hours := (seconds % 86400) / 3600
+	minutes := (seconds % 3600) / 60
+
+	if days > 0 {
+		return fmt.Sprintf("in %d days, %d hours", days, hours)
+	} else if hours > 0 {
+		return fmt.Sprintf("in %d hours, %d minutes", hours, minutes)
+	} else {
+		return fmt.Sprintf("in %d minutes", minutes)
+	}
+}
+
+// Simple word wrapping function
+func wordWrap(text string, lineWidth int) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+	lineLength := 0
+
+	for _, word := range words {
+		// Handle HTML tags by removing them for display
+		word = strings.ReplaceAll(word, "<br>", "\n")
+		word = strings.ReplaceAll(word, "<i>", "")
+		word = strings.ReplaceAll(word, "</i>", "")
+
+		if lineLength+len(word)+1 > lineWidth {
+			result.WriteString("\n")
+			lineLength = 0
+		} else if lineLength > 0 {
+			result.WriteString(" ")
+			lineLength++
+		}
+
+		result.WriteString(word)
+		lineLength += len(word)
+	}
+
+	return result.String()
+}
+
 // Custom delegate for episode items to make them more compact
 type compactDelegate struct {
 	styles  list.DefaultItemStyles
@@ -158,6 +244,7 @@ type Model struct {
 	activeTab        int    // 0 = watching, 1 = planned
 	tabs             []string
 	confirmingStatus bool
+	detailsContent   string
 }
 
 func NewModel(config *Config) *Model {
@@ -243,7 +330,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
+			if m.state == "details" {
+				// Return to selection screen from details view
+				m.state = "selecting"
+				return m, nil
+			}
 			return m, tea.Quit
+		case "i", "I":
+			if m.state == "selecting" {
+				var selectedItem AnimeItem
+				var ok bool
+
+				if m.activeTab == 0 {
+					selectedItem, ok = m.animeList.SelectedItem().(AnimeItem)
+				} else {
+					selectedItem, ok = m.plannedList.SelectedItem().(AnimeItem)
+				}
+
+				if ok {
+					m.detailsContent = selectedItem.DetailedView()
+					m.state = "details"
+					return m, nil
+				}
+			}
+		case "esc":
+			switch m.state {
+			case "details":
+				m.state = "selecting"
+				return m, nil
+			case "episode":
+				m.state = "selecting"
+				return m, nil
+			}
 		case "tab", "right", "l":
 			if m.state == "selecting" {
 				m.activeTab = (m.activeTab + 1) % len(m.tabs)
@@ -258,7 +376,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == "confirming" {
 				return m, func() tea.Msg { return statusChangeMsg{confirmed: true} }
 			}
-
 		case "n":
 			if m.state == "confirming" {
 				return m, func() tea.Msg { return statusChangeMsg{confirmed: false} }
@@ -268,43 +385,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "selecting":
 				var selectedItem AnimeItem
 				var ok bool
-
 				if m.activeTab == 0 {
 					selectedItem, ok = m.animeList.SelectedItem().(AnimeItem)
 				} else {
 					selectedItem, ok = m.plannedList.SelectedItem().(AnimeItem)
 				}
-
 				if ok {
 					m.selectedAnime = &selectedItem
 					m.state = "episode"
-
 					episodeCount := selectedItem.animeEntry.Episodes
-					if episodeCount <= 0 {
-						episodeCount = 13 // Default to some reasonable value for planned anime
-					}
-
 					items := make([]list.Item, episodeCount)
 					for i := 0; i < episodeCount; i++ {
 						items[i] = EpisodeItem{number: i + 1}
 					}
-
 					m.episodeList.SetItems(items)
-
 					// Select the next episode by default
 					nextEp := selectedItem.animeEntry.Progress + 1
 					if nextEp >= 0 && nextEp <= len(items) {
 						m.episodeList.Select(nextEp - 1)
 					}
-
 					return m, nil
 				}
 			case "episode":
 				m.state = "loading"
 				return m, m.startPlayEpisode()
-			}
-		case "esc":
-			if m.state == "episode" {
+			case "details":
 				m.state = "selecting"
 				return m, nil
 			}
@@ -485,6 +590,13 @@ func (m *Model) View() string {
 		b.WriteString("\n   Tab: Switch between lists, Enter: Select, q: Quit\n")
 
 		return b.String()
+	case "details":
+		var b strings.Builder
+		b.WriteString("\n   ")
+		b.WriteString(m.detailsContent)
+		b.WriteString("\n\n   Press Enter or Esc to go back\n")
+		return b.String()
+
 	case "episode":
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("\n   %s\n\n", titleStyle.Render(m.selectedAnime.animeEntry.Title)))
@@ -504,6 +616,7 @@ func (m *Model) View() string {
 		return b.String()
 	case "loading":
 		return fmt.Sprintf("\n\n   %s Loading episode...\n\n", m.spinner.View())
+
 	case "confirming":
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("\n\n   %s\n\n", titleStyle.Render("Move to Currently Watching?")))
