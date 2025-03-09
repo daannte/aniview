@@ -22,6 +22,14 @@ func DiscordPresence(clientId string, anime AnimeEntry) error {
 		return err
 	}
 
+	if anime.EpisodeDuration == 0 {
+		dur, err := getVideoDuration("/tmp/iinasocket")
+		if err != nil {
+			return err
+		}
+		anime.EpisodeDuration = int(dur)
+	}
+
 	var state string
 	if isPaused {
 		state = fmt.Sprintf("\nEpisode %d - %s (Paused)", anime.CurrentEpisode, FormatTime(int(timePos)))

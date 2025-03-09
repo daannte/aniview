@@ -62,6 +62,22 @@ func MPVSendCommand(ipcSocketPath string, command []interface{}) (interface{}, e
 	return nil, nil
 }
 
+func getVideoDuration(ipcSocketPath string) (float64, error) {
+	// Send the 'get_property' command to MPV to get the duration of the video
+	command := []interface{}{"get_property", "duration"}
+	data, err := MPVSendCommand(ipcSocketPath, command)
+	if err != nil {
+		return 0, err
+	}
+
+	// Assert the data to float64 (MPV will return a float representing the duration in seconds)
+	if videoDuration, ok := data.(float64); ok {
+		return videoDuration, nil
+	}
+
+	return 0, nil
+}
+
 func getCurrentPlaybackTime(ipcSocketPath string) (float64, error) {
 	// Send the 'get_property' command to MPV to get the current time-pos
 	command := []interface{}{"get_property", "time-pos"}
@@ -75,7 +91,7 @@ func getCurrentPlaybackTime(ipcSocketPath string) (float64, error) {
 		return timePos, nil
 	}
 
-	return 0, fmt.Errorf("invalid response type for 'time-pos'")
+	return 0, nil
 }
 
 func getPausedState(ipcSocketPath string) (bool, error) {
@@ -91,7 +107,7 @@ func getPausedState(ipcSocketPath string) (bool, error) {
 		return paused, nil
 	}
 
-	return false, fmt.Errorf("invalid response type for 'pause'")
+	return false, nil
 }
 
 func CleanupSocket(socketPath string) {
