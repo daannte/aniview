@@ -585,16 +585,12 @@ func (m *Model) View() string {
 		} else {
 			b.WriteString(m.plannedList.View())
 		}
-
-		// Help text
-		b.WriteString("\n   Tab: Switch between lists, Enter: Select, q: Quit\n")
-
 		return b.String()
+
 	case "details":
 		var b strings.Builder
 		b.WriteString("\n   ")
 		b.WriteString(m.detailsContent)
-		b.WriteString("\n\n   Press Enter or Esc to go back\n")
 		return b.String()
 
 	case "episode":
