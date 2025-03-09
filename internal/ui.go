@@ -138,21 +138,26 @@ func NewCompactDelegate() list.ItemDelegate {
 	}
 }
 
+type statusChangeMsg struct {
+	confirmed bool
+}
+
 // Model represents the UI state
 type Model struct {
-	config         *Config
-	animeList      list.Model
-	plannedList    list.Model
-	episodeList    list.Model
-	animeEntries   []AnimeEntry
-	plannedEntries []AnimeEntry
-	loading        bool
-	spinner        spinner.Model
-	err            error
-	selectedAnime  *AnimeItem
-	state          string // "selecting", "episode", "loading", "error"
-	activeTab      int    // 0 = watching, 1 = planned
-	tabs           []string
+	config           *Config
+	animeList        list.Model
+	plannedList      list.Model
+	episodeList      list.Model
+	animeEntries     []AnimeEntry
+	plannedEntries   []AnimeEntry
+	loading          bool
+	spinner          spinner.Model
+	err              error
+	selectedAnime    *AnimeItem
+	state            string // "selecting", "episode", "loading", "error"
+	activeTab        int    // 0 = watching, 1 = planned
+	tabs             []string
+	confirmingStatus bool
 }
 
 func NewModel(config *Config) *Model {
@@ -249,6 +254,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeTab = (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
 				return m, nil
 			}
+		case "y":
+			if m.state == "confirming" {
+				return m, func() tea.Msg { return statusChangeMsg{confirmed: true} }
+			}
+
+		case "n":
+			if m.state == "confirming" {
+				return m, func() tea.Msg { return statusChangeMsg{confirmed: false} }
+			}
 		case "enter":
 			switch m.state {
 			case "selecting":
@@ -340,17 +354,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Update progress in AniList
 				_ = UpdateProgress(m.config, m.selectedAnime.animeEntry.ID, epItem.number)
 
-				// Move from planned to watching if it was in planned
-				if m.activeTab == 1 {
-					// If this is the first episode watched, move the anime from planned to watching
-					if epItem.number == 1 {
-						// We should update the lists, but for simplicity we'll just return to
-						// the selection screen and force a refresh on next start
-						m.state = "selecting"
-						return m, nil
-					}
-				}
-
 				// Update local progress if the watched episode is the next one
 				if epItem.number == m.selectedAnime.animeEntry.Progress+1 {
 					if m.activeTab == 0 {
@@ -375,11 +378,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.plannedList.SetItems(items)
 					}
 				}
+				if m.activeTab == 1 {
+					// Create a confirmation model and prompt the user
+					return m, m.promptStatusChange()
+				}
 			}
 
 			// Return to selection screen
 			m.state = "selecting"
 		}
+		return m, nil
+	case statusChangeMsg:
+		if msg.confirmed {
+			// User confirmed, update the anime status to CURRENT
+			err := UpdateAnime(m.config, m.selectedAnime.animeEntry.ID, m.selectedAnime.animeEntry.Progress, "CURRENT")
+			if err != nil {
+				m.err = err
+				m.state = "error"
+				return m, nil
+			}
+
+			// We should refresh the lists since we've moved an item from planned to current
+			m.state = "loading"
+			m.loading = true
+			return m, m.InitAnimeLists()
+		}
+
+		// User declined or operation complete, return to selection
+		m.state = "selecting"
 		return m, nil
 	}
 
@@ -419,6 +445,17 @@ func (m *Model) renderTabs() string {
 
 	// Join tabs with a horizontal layout
 	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+}
+
+func (m *Model) promptStatusChange() tea.Cmd {
+	m.state = "confirming"
+	m.confirmingStatus = true
+
+	return func() tea.Msg {
+		// This would normally show a prompt, but we'll handle the UI in the View method
+		// Just return a placeholder message to force an update
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{}}
+	}
 }
 
 // View renders the UI
@@ -467,6 +504,12 @@ func (m *Model) View() string {
 		return b.String()
 	case "loading":
 		return fmt.Sprintf("\n\n   %s Loading episode...\n\n", m.spinner.View())
+	case "confirming":
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("\n\n   %s\n\n", titleStyle.Render("Move to Currently Watching?")))
+		b.WriteString(fmt.Sprintf("   Do you want to move '%s' to your Currently Watching list?\n\n", m.selectedAnime.animeEntry.Title))
+		b.WriteString("   Press [y] to confirm, [n] to keep in Planned\n")
+		return b.String()
 	}
 
 	return "Something went wrong"

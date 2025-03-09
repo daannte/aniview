@@ -251,6 +251,31 @@ func UpdateProgress(config *Config, mediaID int, progress int) error {
 	return nil
 }
 
+func UpdateAnime(config *Config, mediaID int, progress int, status string) error {
+	query := `
+	mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
+		SaveMediaListEntry(mediaId: $mediaId, progress: $progress, status: $status) {
+			id
+			progress
+			status
+		}
+	}
+	`
+
+	variables := map[string]interface{}{
+		"mediaId":  mediaID,
+		"progress": progress,
+		"status":   status,
+	}
+
+	var response map[string]interface{}
+	if err := executeAniListQuery(config.Token, query, variables, &response); err != nil {
+		return fmt.Errorf("failed to update anime: %v", err)
+	}
+
+	return nil
+}
+
 // executeAniListQuery executes a GraphQL query against the AniList API
 func executeAniListQuery(token string, query string, variables map[string]interface{}, result interface{}) error {
 	// Create the request body
