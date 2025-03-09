@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -96,8 +97,8 @@ func (i AnimeItem) DetailedView() string {
 
 	// Format and add the description with word wrapping
 	if i.animeEntry.Description != "" {
-		// Simple word wrapping for description (80 chars per line)
-		wrappedDesc := wordWrap(i.animeEntry.Description, 80)
+		// Simple word wrapping for description
+		wrappedDesc := wordWrap(i.animeEntry.Description, 120)
 		b.WriteString(wrappedDesc)
 	} else {
 		b.WriteString("No description available.")
@@ -244,7 +245,7 @@ type Model struct {
 	activeTab        int    // 0 = watching, 1 = planned
 	tabs             []string
 	confirmingStatus bool
-	detailsContent   string
+	viewport         viewport.Model
 }
 
 func NewModel(config *Config) *Model {
@@ -275,6 +276,9 @@ func NewModel(config *Config) *Model {
 	episodeList.SetFilteringEnabled(true)
 	episodeList.Styles.Title = titleStyle
 
+	vp := viewport.New(0, 0)
+	vp.Style = lipgloss.NewStyle().Padding(1, 2)
+
 	return &Model{
 		config:      config,
 		animeList:   animeList,
@@ -285,6 +289,7 @@ func NewModel(config *Config) *Model {
 		state:       "loading",
 		activeTab:   0,
 		tabs:        []string{"Currently Watching", "Planned"},
+		viewport:    vp,
 	}
 }
 
@@ -326,6 +331,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.animeList.SetSize(h, v)
 		m.plannedList.SetSize(h, v)
 		m.episodeList.SetSize(h, v)
+
+		m.viewport.Width = h
+		m.viewport.Height = v
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -348,7 +356,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if ok {
-					m.detailsContent = selectedItem.DetailedView()
+					m.viewport.SetContent(selectedItem.DetailedView())
+					m.viewport.GotoTop()
 					m.state = "details"
 					return m, nil
 				}
@@ -523,9 +532,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.plannedList, cmd = m.plannedList.Update(msg)
 		}
 		return m, cmd
+
 	case "episode":
 		var cmd tea.Cmd
 		m.episodeList, cmd = m.episodeList.Update(msg)
+		return m, cmd
+
+	case "details":
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	}
 
@@ -589,8 +604,8 @@ func (m *Model) View() string {
 
 	case "details":
 		var b strings.Builder
-		b.WriteString("\n   ")
-		b.WriteString(m.detailsContent)
+		b.WriteString("\n   " + titleStyle.Render("Anime Details") + "\n\n")
+		b.WriteString(m.viewport.View())
 		return b.String()
 
 	case "episode":
