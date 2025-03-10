@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/daannte/rich-go/client"
 )
@@ -31,14 +32,20 @@ func DiscordPresence(clientId string, anime AnimeEntry) error {
 	}
 
 	var state string
+	var startTime *time.Time
+	var endTime *time.Time
+
 	if isPaused {
-		state = fmt.Sprintf("\nEpisode %d - %s (Paused)", anime.CurrentEpisode, FormatTime(int(timePos)))
+		state = fmt.Sprintf("\nEpisode %d (Paused)", anime.CurrentEpisode)
+		startTime = nil
+		endTime = nil
 	} else {
-		if anime.EpisodeDuration != 0 {
-			state = fmt.Sprintf("\nEpisode %d - %s / %s", anime.CurrentEpisode, FormatTime(int(timePos)), FormatTime(anime.EpisodeDuration))
-		} else {
-			state = fmt.Sprintf("\nEpisode %d - %s", anime.CurrentEpisode, FormatTime(int(timePos)))
-		}
+		state = fmt.Sprintf("\nEpisode %d", anime.CurrentEpisode)
+		now := time.Now()
+		calculatedStartTime := now.Add(-time.Duration(timePos) * time.Second)
+		calculatedEndTime := calculatedStartTime.Add(time.Duration(anime.EpisodeDuration) * time.Second)
+		startTime = &calculatedStartTime
+		endTime = &calculatedEndTime
 	}
 
 	err = client.SetActivity(client.Activity{
@@ -47,6 +54,10 @@ func DiscordPresence(clientId string, anime AnimeEntry) error {
 		LargeImage: anime.CoverImage,
 		LargeText:  anime.Title,
 		State:      state,
+		Timestamps: &client.Timestamps{
+			Start: startTime,
+			End:   endTime,
+		},
 		Buttons: []*client.Button{
 			{
 				Label: "View on AniList",
