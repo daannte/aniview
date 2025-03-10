@@ -294,13 +294,13 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case "tab", "right", "l":
+	case "tab", "right":
 		if m.State == StateSelecting {
 			m.ActiveTab = (m.ActiveTab + 1) % len(m.Tabs)
 			return m, nil
 		}
 
-	case "shift+tab", "left", "h":
+	case "shift+tab", "left":
 		if m.State == StateSelecting {
 			m.ActiveTab = (m.ActiveTab - 1 + len(m.Tabs)) % len(m.Tabs)
 			return m, nil
