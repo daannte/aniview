@@ -37,23 +37,33 @@ func WordWrap(text string, lineWidth int) string {
 	lineLength := 0
 
 	for _, word := range words {
-		// Handle HTML tags by removing them for display
 		word = strings.ReplaceAll(word, "<br>", "\n")
 		word = strings.ReplaceAll(word, "<i>", "")
 		word = strings.ReplaceAll(word, "</i>", "")
 		word = strings.ReplaceAll(word, "<b>", "")
 		word = strings.ReplaceAll(word, "</b>", "")
 
-		if lineLength+len(word)+1 > lineWidth {
-			result.WriteString("\n")
-			lineLength = 0
-		} else if lineLength > 0 {
-			result.WriteString(" ")
-			lineLength++
-		}
+		parts := strings.Split(word, "\n")
+		for i, part := range parts {
+			if i > 0 {
+				result.WriteString("\n")
+				lineLength = 0
+			}
+			if len(part) == 0 {
+				continue // Skip empty parts from consecutive \n
+			}
 
-		result.WriteString(word)
-		lineLength += len(word)
+			if lineLength+len(part)+1 > lineWidth {
+				result.WriteString("\n")
+				lineLength = 0
+			} else if lineLength > 0 {
+				result.WriteString(" ")
+				lineLength++
+			}
+
+			result.WriteString(part)
+			lineLength += len(part)
+		}
 	}
 
 	return result.String()
