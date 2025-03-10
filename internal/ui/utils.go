@@ -41,6 +41,8 @@ func WordWrap(text string, lineWidth int) string {
 		word = strings.ReplaceAll(word, "<br>", "\n")
 		word = strings.ReplaceAll(word, "<i>", "")
 		word = strings.ReplaceAll(word, "</i>", "")
+		word = strings.ReplaceAll(word, "<b>", "")
+		word = strings.ReplaceAll(word, "</b>", "")
 
 		if lineLength+len(word)+1 > lineWidth {
 			result.WriteString("\n")
