@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/daannte/rich-go/client"
 )
 
 // Constants
@@ -558,6 +560,7 @@ func PlayEpisode(links []string, anime AnimeEntry) error {
 
 	go func() {
 		defer wg.Done()
+		defer client.Logout()
 
 		// Wait for the socket file to exist before proceeding
 		if err := waitForSocket(socketPath); err != nil {
