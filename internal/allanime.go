@@ -67,6 +67,16 @@ type episodeResult struct {
 	err   error
 }
 
+// FindKeyByValue searches for a key associated with a given value in a map[string]string
+func FindKeyByValue(m map[string]string, value string) (string, error) {
+	for key, val := range m {
+		if val == value {
+			return key, nil // Return the key and true if the value is found
+		}
+	}
+	return "", fmt.Errorf("no key with value %v", value) // Return empty string and false if the value is not found
+}
+
 // SearchAnime searches for anime by query and returns a map of ID to anime name
 func SearchAnime(query, mode string) (map[string]string, error) {
 	animeList := make(map[string]string)

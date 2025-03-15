@@ -153,11 +153,9 @@ func (m *Model) StartPlayEpisode() tea.Cmd {
 			return EpisodePlayedMsg{Err: fmt.Errorf("no anime found with title: %s", animeTitle)}
 		}
 
-		// Get the first result's ID
-		var animeID string
-		for id := range animeResults {
-			animeID = id
-			break
+		animeID, err := internal.FindKeyByValue(animeResults, fmt.Sprintf("%v (%d episodes)", animeTitle, m.SelectedAnime.AnimeEntry.Episodes))
+		if err != nil {
+			return EpisodePlayedMsg{Err: fmt.Errorf("failed to get anime: %v", err)}
 		}
 
 		// Get the episode URL
