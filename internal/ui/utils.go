@@ -88,3 +88,21 @@ func RenderTabs(tabs []string, activeTab int) string {
 	// Join tabs with a horizontal layout
 	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 }
+
+func parseAnimeTitle(fullTitle string) (string, string) {
+	// Default values
+	title := fullTitle
+	episodeCount := "Unknown episodes"
+
+	// Check if the title contains episode information in parentheses
+	if idx := strings.LastIndex(fullTitle, " ("); idx != -1 {
+		// Extract the title without the episode count
+		title = strings.TrimSpace(fullTitle[:idx])
+
+		// Extract episode count text
+		episodePart := fullTitle[idx+2:] // Skip the " (" part
+		episodeCount = strings.TrimSuffix(episodePart, ")")
+	}
+
+	return title, episodeCount
+}

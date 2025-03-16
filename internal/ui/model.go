@@ -16,78 +16,94 @@ import (
 type UIState string
 
 const (
-	StateLoading    UIState = "loading"
-	StateSelecting  UIState = "selecting"
-	StateEpisode    UIState = "episode"
-	StateDetails    UIState = "details"
-	StateError      UIState = "error"
-	StateConfirming UIState = "confirming"
+	StateLoading     UIState = "loading"
+	StateSelecting   UIState = "selecting"
+	StateEpisode     UIState = "episode"
+	StateDetails     UIState = "details"
+	StateError       UIState = "error"
+	StateConfirming  UIState = "confirming"
+	StateAnimeSelect UIState = "animeselect" // New state for anime selection
 )
 
 // Model represents the UI state
 type Model struct {
-	Config           *internal.Config
-	Anilist          *internal.AniListClient
-	AnimeList        list.Model
-	PlannedList      list.Model
-	EpisodeList      list.Model
-	AnimeEntries     []internal.AnimeEntry
-	PlannedEntries   []internal.AnimeEntry
-	Loading          bool
-	Spinner          spinner.Model
-	Err              error
-	SelectedAnime    *AnimeItem
-	State            UIState
-	ActiveTab        int // 0 = watching, 1 = planned
-	Tabs             []string
-	ConfirmingStatus bool
-	Viewport         viewport.Model
+	Config             *internal.Config
+	Anilist            *internal.AniListClient
+	AnimeList          list.Model
+	PlannedList        list.Model
+	EpisodeList        list.Model
+	AnimeSearchList    list.Model // New list for anime search results
+	AnimeEntries       []internal.AnimeEntry
+	PlannedEntries     []internal.AnimeEntry
+	Loading            bool
+	Spinner            spinner.Model
+	Err                error
+	SelectedAnime      *AnimeItem
+	State              UIState
+	ActiveTab          int // 0 = watching, 1 = planned
+	Tabs               []string
+	ConfirmingStatus   bool
+	Viewport           viewport.Model
+	AnimeSearchResults map[string]string // Store search results
+	SelectedEpisode    int               // Store selected episode for resuming after selection
 }
+
+// Define a new type for search results
+type AnimeSearchItem struct {
+	ID           string
+	AnimeTitle   string
+	EpisodeCount string
+}
+
+func (a AnimeSearchItem) Title() string       { return a.AnimeTitle }
+func (a AnimeSearchItem) Description() string { return a.EpisodeCount }
+func (a AnimeSearchItem) FilterValue() string { return a.AnimeTitle }
 
 // NewModel creates a new UI model
 func NewModel(config *internal.Config, anilist *internal.AniListClient) *Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-
 	// Create anime list
 	animeDelegate := list.NewDefaultDelegate()
 	animeDelegate.Styles.SelectedTitle = animeDelegate.Styles.SelectedTitle.Foreground(lipgloss.Color("#04B575"))
 	animeDelegate.Styles.SelectedDesc = animeDelegate.Styles.SelectedDesc.Foreground(lipgloss.Color("#04B575"))
-
 	animeList := list.New([]list.Item{}, animeDelegate, 0, 0)
 	animeList.SetShowStatusBar(false)
 	animeList.SetFilteringEnabled(true)
 	animeList.SetShowTitle(false)
-
 	// Create planned list
 	plannedList := list.New([]list.Item{}, animeDelegate, 0, 0)
 	plannedList.SetShowStatusBar(false)
 	plannedList.SetFilteringEnabled(true)
 	plannedList.SetShowTitle(false)
-
 	// Create episode list with compact delegate
 	episodeList := list.New([]list.Item{}, NewCompactDelegate(), 0, 0)
 	episodeList.Title = "Select Episode"
 	episodeList.SetShowStatusBar(false)
 	episodeList.SetFilteringEnabled(true)
 	episodeList.Styles.Title = TitleStyle
-
+	// Create anime search results list
+	animeSearchList := list.New([]list.Item{}, animeDelegate, 0, 0)
+	animeSearchList.Title = "Select Anime"
+	animeSearchList.SetShowStatusBar(false)
+	animeSearchList.SetFilteringEnabled(true)
+	animeSearchList.Styles.Title = TitleStyle
 	vp := viewport.New(0, 0)
 	vp.Style = lipgloss.NewStyle().Padding(1, 2)
-
 	return &Model{
-		Config:      config,
-		Anilist:     anilist,
-		AnimeList:   animeList,
-		PlannedList: plannedList,
-		EpisodeList: episodeList,
-		Spinner:     s,
-		Loading:     true,
-		State:       StateLoading,
-		ActiveTab:   0,
-		Tabs:        []string{"Currently Watching", "Planned"},
-		Viewport:    vp,
+		Config:          config,
+		Anilist:         anilist,
+		AnimeList:       animeList,
+		PlannedList:     plannedList,
+		EpisodeList:     episodeList,
+		AnimeSearchList: animeSearchList,
+		Spinner:         s,
+		Loading:         true,
+		State:           StateLoading,
+		ActiveTab:       0,
+		Tabs:            []string{"Currently Watching", "Planned"},
+		Viewport:        vp,
 	}
 }
 
@@ -99,13 +115,11 @@ func (m *Model) InitAnimeLists() tea.Cmd {
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-
 		// Get planned anime
 		plannedEntries, err := m.Anilist.GetPlanned(m.Config.UserID)
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-
 		return AnimeListsMsg{
 			Watching: animeEntries,
 			Planned:  plannedEntries,
@@ -125,11 +139,34 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) PromptStatusChange() tea.Cmd {
 	m.State = StateConfirming
 	m.ConfirmingStatus = true
-
 	return func() tea.Msg {
 		// This would normally show a prompt, but we'll handle the UI in the View method
 		// Just return a placeholder message to force an update
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{}}
+	}
+}
+
+// Define a new message type for anime selection
+type AnimeSearchResultsMsg struct {
+	Results map[string]string
+	Err     error
+	EpNum   int
+}
+
+// StartAnimeSearch searches for anime and displays results for selection
+func (m *Model) StartAnimeSearch(animeTitle string, epNum int) tea.Cmd {
+	return func() tea.Msg {
+		animeResults, err := internal.SearchAnime(animeTitle, "sub") // Use "sub" as the default mode
+		if err != nil {
+			return AnimeSearchResultsMsg{Err: err}
+		}
+		if len(animeResults) == 0 {
+			return AnimeSearchResultsMsg{Err: fmt.Errorf("no anime found with title: %s", animeTitle)}
+		}
+		return AnimeSearchResultsMsg{
+			Results: animeResults,
+			EpNum:   epNum,
+		}
 	}
 }
 
@@ -141,21 +178,40 @@ func (m *Model) StartPlayEpisode() tea.Cmd {
 		if !ok {
 			return EpisodePlayedMsg{Err: fmt.Errorf("failed to get selected episode")}
 		}
-
 		epNum := epItem.Number
 		animeTitle := m.SelectedAnime.AnimeEntry.Title
 		animeResults, err := internal.SearchAnime(animeTitle, "sub") // Use "sub" as the default mode
 		if err != nil {
 			return EpisodePlayedMsg{Err: fmt.Errorf("failed to search anime: %v", err)}
 		}
-
 		if len(animeResults) == 0 {
 			return EpisodePlayedMsg{Err: fmt.Errorf("no anime found with title: %s", animeTitle)}
 		}
 
+		// Try to find the anime by title
 		animeID, err := internal.FindKeyByValue(animeResults, fmt.Sprintf("%v (%d episodes)", animeTitle, m.SelectedAnime.AnimeEntry.Episodes))
 		if err != nil {
-			return EpisodePlayedMsg{Err: fmt.Errorf("failed to get anime: %v", err)}
+			// Instead of returning an error, store the results and episode number and change state
+			m.AnimeSearchResults = animeResults
+			m.SelectedEpisode = epNum
+
+			// Create list items from search results
+			searchItems := make([]list.Item, 0, len(animeResults))
+			for id, fullTitle := range animeResults {
+				// Parse the title to get clean title and episode count
+				cleanTitle, episodeCount := parseAnimeTitle(fullTitle)
+
+				searchItems = append(searchItems, AnimeSearchItem{
+					ID:           id,
+					AnimeTitle:   cleanTitle,
+					EpisodeCount: episodeCount,
+				})
+			}
+			m.AnimeSearchList.SetItems(searchItems)
+			m.State = StateAnimeSelect
+
+			// Return a dummy message to force update
+			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{}}
 		}
 
 		// Get the episode URL
@@ -163,11 +219,26 @@ func (m *Model) StartPlayEpisode() tea.Cmd {
 		if err != nil {
 			return EpisodePlayedMsg{Err: fmt.Errorf("failed to get episode URL: %v", err)}
 		}
-
 		// Update the current episode
 		m.SelectedAnime.AnimeEntry.CurrentEpisode = epNum
 		internal.GetEpisodeData(m.SelectedAnime.AnimeEntry.MalId, epNum, &m.SelectedAnime.AnimeEntry)
+		// Play the episode
+		err = internal.PlayEpisode(links, m.SelectedAnime.AnimeEntry)
+		return EpisodePlayedMsg{Err: err}
+	}
+}
 
+// PlaySelectedAnime plays the episode with the selected anime ID
+func (m *Model) PlaySelectedAnime(animeID string, epNum int) tea.Cmd {
+	return func() tea.Msg {
+		// Get the episode URL
+		links, err := internal.GetEpisodeURL(animeID, epNum)
+		if err != nil {
+			return EpisodePlayedMsg{Err: fmt.Errorf("failed to get episode URL: %v", err)}
+		}
+		// Update the current episode
+		m.SelectedAnime.AnimeEntry.CurrentEpisode = epNum
+		internal.GetEpisodeData(m.SelectedAnime.AnimeEntry.MalId, epNum, &m.SelectedAnime.AnimeEntry)
 		// Play the episode
 		err = internal.PlayEpisode(links, m.SelectedAnime.AnimeEntry)
 		return EpisodePlayedMsg{Err: err}
@@ -182,52 +253,68 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.AnimeList.SetSize(h, v)
 		m.PlannedList.SetSize(h, v)
 		m.EpisodeList.SetSize(h, v)
-
+		m.AnimeSearchList.SetSize(h, v)
 		m.Viewport.Width = h
 		m.Viewport.Height = v
 		return m, nil
-
 	case tea.KeyMsg:
 		return m.handleKeyPress(msg)
-
 	case AnimeListsMsg:
 		m.AnimeEntries = msg.Watching
 		m.PlannedEntries = msg.Planned
-
 		// Create items for watching list
 		watchingItems := make([]list.Item, len(m.AnimeEntries))
 		for i, entry := range m.AnimeEntries {
 			watchingItems[i] = AnimeItem{AnimeEntry: entry, Index: i}
 		}
 		m.AnimeList.SetItems(watchingItems)
-
 		// Create items for planned list
 		plannedItems := make([]list.Item, len(m.PlannedEntries))
 		for i, entry := range m.PlannedEntries {
 			plannedItems[i] = AnimeItem{AnimeEntry: entry, Index: i}
 		}
 		m.PlannedList.SetItems(plannedItems)
-
 		m.Loading = false
 		m.State = StateSelecting
 		return m, nil
-
 	case ErrMsg:
 		m.Err = msg.Err
 		m.Loading = false
 		m.State = StateError
 		return m, nil
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.Spinner, cmd = m.Spinner.Update(msg)
 		return m, cmd
-
 	case EpisodePlayedMsg:
 		return m.handleEpisodePlayed(msg)
-
 	case StatusChangeMsg:
 		return m.handleStatusChange(msg)
+	case AnimeSearchResultsMsg:
+		if msg.Err != nil {
+			m.Err = msg.Err
+			m.State = StateError
+			return m, nil
+		}
+		// Store the search results and episode number
+		m.AnimeSearchResults = msg.Results
+		m.SelectedEpisode = msg.EpNum
+
+		// Create list items from search results
+		searchItems := make([]list.Item, 0, len(msg.Results))
+		for id, fullTitle := range msg.Results {
+			// Parse the title to get clean title and episode count
+			cleanTitle, episodeCount := parseAnimeTitle(fullTitle)
+
+			searchItems = append(searchItems, AnimeSearchItem{
+				ID:           id,
+				AnimeTitle:   cleanTitle,
+				EpisodeCount: episodeCount,
+			})
+		}
+		m.AnimeSearchList.SetItems(searchItems)
+		m.State = StateAnimeSelect
+		return m, nil
 	}
 
 	// Handle state-specific updates
@@ -240,18 +327,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.PlannedList, cmd = m.PlannedList.Update(msg)
 		}
 		return m, cmd
-
 	case StateEpisode:
 		var cmd tea.Cmd
 		m.EpisodeList, cmd = m.EpisodeList.Update(msg)
 		return m, cmd
-
 	case StateDetails:
 		var cmd tea.Cmd
 		m.Viewport, cmd = m.Viewport.Update(msg)
 		return m, cmd
+	case StateAnimeSelect:
+		var cmd tea.Cmd
+		m.AnimeSearchList, cmd = m.AnimeSearchList.Update(msg)
+		return m, cmd
 	}
-
 	return m, nil
 }
 
@@ -259,24 +347,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		if m.State == StateDetails {
-			// Return to selection screen from details view
+		if m.State == StateDetails || m.State == StateAnimeSelect {
+			// Return to selection screen from details view or anime selection
 			m.State = StateSelecting
 			return m, nil
 		}
 		return m, tea.Quit
-
 	case "i", "I":
 		if m.State == StateSelecting {
 			var selectedItem AnimeItem
 			var ok bool
-
 			if m.ActiveTab == 0 {
 				selectedItem, ok = m.AnimeList.SelectedItem().(AnimeItem)
 			} else {
 				selectedItem, ok = m.PlannedList.SelectedItem().(AnimeItem)
 			}
-
 			if ok {
 				m.Viewport.SetContent(selectedItem.DetailedView())
 				m.Viewport.GotoTop()
@@ -284,36 +369,30 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-
 	case "esc":
 		switch m.State {
-		case StateDetails, StateEpisode:
+		case StateDetails, StateEpisode, StateAnimeSelect:
 			m.State = StateSelecting
 			return m, nil
 		}
-
 	case "tab", "right":
 		if m.State == StateSelecting {
 			m.ActiveTab = (m.ActiveTab + 1) % len(m.Tabs)
 			return m, nil
 		}
-
 	case "shift+tab", "left":
 		if m.State == StateSelecting {
 			m.ActiveTab = (m.ActiveTab - 1 + len(m.Tabs)) % len(m.Tabs)
 			return m, nil
 		}
-
 	case "y":
 		if m.State == StateConfirming {
 			return m, func() tea.Msg { return StatusChangeMsg{Confirmed: true} }
 		}
-
 	case "n":
 		if m.State == StateConfirming {
 			return m, func() tea.Msg { return StatusChangeMsg{Confirmed: false} }
 		}
-
 	case "enter":
 		switch m.State {
 		case StateSelecting:
@@ -346,12 +425,16 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case StateDetails:
 			m.State = StateSelecting
 			return m, nil
+		case StateAnimeSelect:
+			// User selected an anime from the search results
+			if selectedItem, ok := m.AnimeSearchList.SelectedItem().(AnimeSearchItem); ok {
+				m.State = StateLoading
+				return m, m.PlaySelectedAnime(selectedItem.ID, m.SelectedEpisode)
+			}
 		}
 	}
-
 	// Pass key events to the appropriate list based on the current state
 	var cmd tea.Cmd
-
 	switch m.State {
 	case StateSelecting:
 		if m.ActiveTab == 0 {
@@ -363,8 +446,9 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.EpisodeList, cmd = m.EpisodeList.Update(msg)
 	case StateDetails:
 		m.Viewport, cmd = m.Viewport.Update(msg)
+	case StateAnimeSelect:
+		m.AnimeSearchList, cmd = m.AnimeSearchList.Update(msg)
 	}
-
 	return m, cmd
 }
 
@@ -379,13 +463,11 @@ func (m *Model) handleEpisodePlayed(msg EpisodePlayedMsg) (tea.Model, tea.Cmd) {
 		if ok {
 			// Update progress in AniList
 			_ = m.Anilist.UpdateProgress(m.SelectedAnime.AnimeEntry.ID, epItem.Number)
-
 			// Update local progress if the watched episode is the next one
 			if epItem.Number == m.SelectedAnime.AnimeEntry.Progress+1 {
 				if m.ActiveTab == 0 {
 					m.AnimeEntries[m.SelectedAnime.Index].Progress = epItem.Number
 					m.SelectedAnime.AnimeEntry.Progress = epItem.Number
-
 					// Update the list items to reflect the progress change
 					items := make([]list.Item, len(m.AnimeEntries))
 					for i, entry := range m.AnimeEntries {
@@ -395,7 +477,6 @@ func (m *Model) handleEpisodePlayed(msg EpisodePlayedMsg) (tea.Model, tea.Cmd) {
 				} else {
 					m.PlannedEntries[m.SelectedAnime.Index].Progress = epItem.Number
 					m.SelectedAnime.AnimeEntry.Progress = epItem.Number
-
 					// Update the list items to reflect the progress change
 					items := make([]list.Item, len(m.PlannedEntries))
 					for i, entry := range m.PlannedEntries {
@@ -409,7 +490,6 @@ func (m *Model) handleEpisodePlayed(msg EpisodePlayedMsg) (tea.Model, tea.Cmd) {
 				return m, m.PromptStatusChange()
 			}
 		}
-
 		// Return to selection screen
 		m.State = StateSelecting
 	}
@@ -426,13 +506,11 @@ func (m *Model) handleStatusChange(msg StatusChangeMsg) (tea.Model, tea.Cmd) {
 			m.State = StateError
 			return m, nil
 		}
-
 		// We should refresh the lists since we've moved an item from planned to current
 		m.State = StateLoading
 		m.Loading = true
 		return m, m.InitAnimeLists()
 	}
-
 	// User declined or operation complete, return to selection
 	m.State = StateSelecting
 	return m, nil
@@ -443,17 +521,14 @@ func (m *Model) View() string {
 	if m.Loading {
 		return fmt.Sprintf("\n\n   %s Loading anime list...\n\n", m.Spinner.View())
 	}
-
 	if m.Err != nil {
 		return fmt.Sprintf("\n\n   %s\n\n", ErrorStyle.Render(m.Err.Error()))
 	}
-
 	switch m.State {
 	case StateSelecting:
 		var b strings.Builder
 		// Render tabs
 		b.WriteString(fmt.Sprintf("\n   %s\n\n", RenderTabs(m.Tabs, m.ActiveTab)))
-
 		// Render appropriate list
 		if m.ActiveTab == 0 {
 			b.WriteString(m.AnimeList.View())
@@ -461,17 +536,14 @@ func (m *Model) View() string {
 			b.WriteString(m.PlannedList.View())
 		}
 		return b.String()
-
 	case StateDetails:
 		var b strings.Builder
 		b.WriteString("\n   " + TitleStyle.Render("Anime Details") + "\n\n")
 		b.WriteString(m.Viewport.View())
 		return b.String()
-
 	case StateEpisode:
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("\n   %s\n\n", TitleStyle.Render(m.SelectedAnime.AnimeEntry.Title)))
-
 		// Show progress
 		progress := m.SelectedAnime.AnimeEntry.Progress
 		episodes := m.SelectedAnime.AnimeEntry.Episodes
@@ -480,15 +552,19 @@ func (m *Model) View() string {
 		} else {
 			b.WriteString(fmt.Sprintf("   Progress: %d episodes watched\n\n", progress))
 		}
-
 		// Show the episode list
 		b.WriteString(m.EpisodeList.View())
 		b.WriteString("\n\n   Press Enter to watch, Esc to go back\n")
 		return b.String()
-
+	case StateAnimeSelect:
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("\n   %s\n\n", TitleStyle.Render("Select Anime")))
+		b.WriteString(fmt.Sprintf("   No exact match found for \"%s\". Please select from results:\n\n", m.SelectedAnime.AnimeEntry.Title))
+		b.WriteString(m.AnimeSearchList.View())
+		b.WriteString("\n\n   Press Enter to select, Esc to go back\n")
+		return b.String()
 	case StateLoading:
 		return fmt.Sprintf("\n\n   %s Loading episode...\n\n", m.Spinner.View())
-
 	case StateConfirming:
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("\n\n   %s\n\n", TitleStyle.Render("Move to Currently Watching?")))
@@ -496,6 +572,5 @@ func (m *Model) View() string {
 		b.WriteString("   Press [y] to confirm, [n] to keep in Planned\n")
 		return b.String()
 	}
-
 	return "Something went wrong"
 }
