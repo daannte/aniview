@@ -355,18 +355,27 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "i", "I":
 		if m.State == StateSelecting {
-			var selectedItem AnimeItem
-			var ok bool
+			var isFiltering bool
 			if m.ActiveTab == 0 {
-				selectedItem, ok = m.AnimeList.SelectedItem().(AnimeItem)
+				isFiltering = m.AnimeList.FilterState() == list.Filtering
 			} else {
-				selectedItem, ok = m.PlannedList.SelectedItem().(AnimeItem)
+				isFiltering = m.PlannedList.FilterState() == list.Filtering
 			}
-			if ok {
-				m.Viewport.SetContent(selectedItem.DetailedView())
-				m.Viewport.GotoTop()
-				m.State = StateDetails
-				return m, nil
+
+			if !isFiltering {
+				var selectedItem AnimeItem
+				var ok bool
+				if m.ActiveTab == 0 {
+					selectedItem, ok = m.AnimeList.SelectedItem().(AnimeItem)
+				} else {
+					selectedItem, ok = m.PlannedList.SelectedItem().(AnimeItem)
+				}
+				if ok {
+					m.Viewport.SetContent(selectedItem.DetailedView())
+					m.Viewport.GotoTop()
+					m.State = StateDetails
+					return m, nil
+				}
 			}
 		}
 	case "esc":
@@ -396,6 +405,26 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch m.State {
 		case StateSelecting:
+			// Check if filter mode is active
+			var isFiltering bool
+			if m.ActiveTab == 0 {
+				isFiltering = m.AnimeList.FilterState() == list.Filtering
+			} else {
+				isFiltering = m.PlannedList.FilterState() == list.Filtering
+			}
+
+			// If filtering, let the list handle the enter key for search completion
+			if isFiltering {
+				var cmd tea.Cmd
+				if m.ActiveTab == 0 {
+					m.AnimeList, cmd = m.AnimeList.Update(msg)
+				} else {
+					m.PlannedList, cmd = m.PlannedList.Update(msg)
+				}
+				return m, cmd
+			}
+
+			// Otherwise proceed with selection as before
 			var selectedItem AnimeItem
 			var ok bool
 			if m.ActiveTab == 0 {
@@ -419,6 +448,7 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		// Keep the rest of the enter key handling for other states
 		case StateEpisode:
 			m.State = StateLoading
 			return m, m.StartPlayEpisode()
