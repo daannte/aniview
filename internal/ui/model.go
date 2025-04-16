@@ -346,7 +346,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKeyPress handles keyboard input
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		if m.State == StateDetails || m.State == StateAnimeSelect {
 			// Return to selection screen from details view or anime selection
 			m.State = StateSelecting
